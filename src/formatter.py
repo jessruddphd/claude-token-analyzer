@@ -50,6 +50,13 @@ class ReportFormatter:
                 print(f"   Impact:         {rec.impact}")
                 print(f"   Recommendation: {rec.recommendation}")
                 print(f"   Action:         {rec.action}")
+
+                # Show example if available
+                if rec.example:
+                    print(f"\n   📝 EXAMPLE FROM YOUR CONVERSATION:")
+                    print(f"      Current:  \"{rec.example.current}\"")
+                    print(f"      Improved: \"{rec.example.improved}\"")
+
                 print("\n" + "-" * 70 + "\n")
 
     def save_recommendations(self, filepath: str, recommendations: List[Recommendation]) -> None:

@@ -148,6 +148,10 @@ Examples:
             print("💡 Generating recommendations...")
         gen = RecommendationGenerator()
         recommendations = gen.generate(batch_metrics)
+
+        # Enhance with examples from conversations
+        recommendations = gen.enhance_with_examples(recommendations, conversations)
+
         ranked_recs = gen.rank(recommendations)
         if not args.quiet:
             print("✓ Recommendations generated\n")

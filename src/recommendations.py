@@ -1,7 +1,7 @@
 """Recommendation generation engine based on usage patterns."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import List
+from typing import List, Optional
 import statistics
 
 from src.analyzer import BatchMetrics
@@ -17,6 +17,14 @@ class RecommendationPriority(Enum):
 
 
 @dataclass
+class ExamplePrompt:
+    """Example of a problematic prompt and its improvement."""
+
+    current: str
+    improved: str
+
+
+@dataclass
 class Recommendation:
     """A single recommendation."""
 
@@ -26,6 +34,7 @@ class Recommendation:
     impact: str
     recommendation: str
     action: str
+    example: Optional[ExamplePrompt] = None
 
 
 class RecommendationGenerator:
@@ -120,6 +129,83 @@ class RecommendationGenerator:
             )
 
         return recommendations
+
+    def enhance_with_examples(self, recommendations: List[Recommendation], conversations: List) -> List[Recommendation]:
+        """Enhance recommendations with real examples from conversations.
+
+        Args:
+            recommendations: List of recommendations to enhance.
+            conversations: List of Conversation objects.
+
+        Returns:
+            Recommendations with examples added where applicable.
+        """
+        from src.patterns import PatternDetector
+        from src.models import Role
+
+        detector = PatternDetector()
+
+        for rec in recommendations:
+            if rec.category == "Prompt Quality":
+                # Find a short prompt example
+                for conv in conversations:
+                    for msg in conv.messages:
+                        if msg.role == Role.USER and detector.is_short_prompt(msg.content):
+                            # Create an improved version
+                            improved = self._improve_prompt(msg.content)
+                            rec.example = ExamplePrompt(current=msg.content, improved=improved)
+                            break
+                    if rec.example:
+                        break
+
+            elif rec.category == "Communication Efficiency":
+                # Find a clarification loop example
+                for conv in conversations:
+                    if detector.detect_clarification_loop(conv):
+                        # Get the initial vague prompt
+                        for i, msg in enumerate(conv.messages):
+                            if msg.role == Role.USER and i > 0:
+                                # Check if next message is assistant asking for clarification
+                                if (
+                                    i + 1 < len(conv.messages)
+                                    and conv.messages[i + 1].role == Role.ASSISTANT
+                                ):
+                                    assistant_msg = conv.messages[i + 1].content.lower()
+                                    if any(
+                                        word in assistant_msg
+                                        for word in ["clarify", "more", "details", "context", "understand"]
+                                    ):
+                                        improved = self._improve_prompt(msg.content)
+                                        rec.example = ExamplePrompt(current=msg.content, improved=improved)
+                                        break
+                        if rec.example:
+                            break
+
+        return recommendations
+
+    @staticmethod
+    def _improve_prompt(vague_prompt: str) -> str:
+        """Generate an improved version of a vague prompt.
+
+        Args:
+            vague_prompt: Original vague prompt.
+
+        Returns:
+            Improved prompt with more context and structure.
+        """
+        # Simple heuristics to improve prompts
+        improved = vague_prompt.strip()
+
+        # Add structure if missing
+        if len(improved) < 30:
+            # Very short prompt - needs more detail
+            improved = f"{improved}. Please include: what you want, any constraints, and the expected format."
+
+        # If it's a question without context, add context request
+        if improved.endswith("?") and "?" not in improved[:-1]:
+            improved = improved[:-1] + " in detail? Please provide examples if possible."
+
+        return improved
 
     @staticmethod
     def rank(recommendations: List[Recommendation]) -> List[Recommendation]:
