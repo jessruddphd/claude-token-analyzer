@@ -98,16 +98,16 @@ Examples:
         help="Path to exported Claude conversation JSON file",
     )
     parser.add_argument(
-        "--output",
+        "--output-dir",
         "-o",
-        default="recommendations.txt",
-        help="Output file for recommendations (default: recommendations.txt)",
+        default="output",
+        help="Output directory for recommendations and metrics (default: output/)",
     )
     parser.add_argument(
-        "--metrics",
-        "-m",
-        default="metrics.json",
-        help="Output file for metrics JSON (default: metrics.json)",
+        "--fresh",
+        "-f",
+        action="store_true",
+        help="Start fresh - overwrite existing metrics/recommendations files",
     )
     parser.add_argument(
         "--quiet",
@@ -152,6 +152,10 @@ Examples:
         # Enhance with examples from conversations
         recommendations = gen.enhance_with_examples(recommendations, conversations)
 
+        # Set analysis_id on all recommendations to tie them to metrics
+        for rec in recommendations:
+            rec.analysis_id = batch_metrics.analysis_id
+
         ranked_recs = gen.rank(recommendations)
         if not args.quiet:
             print("✓ Recommendations generated\n")
@@ -165,14 +169,23 @@ Examples:
         if not args.quiet:
             print("\n📝 Saving outputs...")
 
+        # Create output directory
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        recommendations_file = output_dir / "recommendations.jsonl"
+        metrics_file = output_dir / "metrics.jsonl"
+
         formatter = ReportFormatter()
-        formatter.save_recommendations(args.output, ranked_recs)
-        formatter.save_metrics(args.metrics, batch_metrics)
+        formatter.save_recommendations_append(
+            recommendations_file, ranked_recs, fresh=args.fresh
+        )
+        formatter.save_metrics_append(metrics_file, batch_metrics, fresh=args.fresh)
 
         if not args.quiet:
-            print(f"✓ Recommendations saved to: {args.output}")
-            print(f"✓ Metrics saved to: {args.metrics}")
-            print(f"\n✅ Analysis complete!\n")
+            print(f"✓ Recommendations appended to: {recommendations_file}")
+            print(f"✓ Metrics appended to: {metrics_file}")
+            print(f"✅ Analysis complete! (ID: {batch_metrics.analysis_id})\n")
 
         return 0
 

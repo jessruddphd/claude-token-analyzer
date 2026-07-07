@@ -1,8 +1,10 @@
 """Recommendation generation engine based on usage patterns."""
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 import statistics
+import uuid
 
 from src.analyzer import BatchMetrics
 
@@ -35,6 +37,8 @@ class Recommendation:
     recommendation: str
     action: str
     example: Optional[ExamplePrompt] = None
+    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    analysis_id: str = ""
 
 
 class RecommendationGenerator:

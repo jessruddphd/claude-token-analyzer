@@ -97,3 +97,58 @@ class ReportFormatter:
 
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(metrics_dict, f, indent=2)
+
+    def save_metrics_append(self, filepath, metrics: BatchMetrics, fresh: bool = False) -> None:
+        """Append metrics to JSONL file (one JSON object per line).
+
+        Args:
+            filepath: Output file path.
+            metrics: Batch metrics to save.
+            fresh: If True, overwrite file instead of appending.
+        """
+        metrics_dict = {
+            "analysis_id": metrics.analysis_id,
+            "timestamp": metrics.timestamp,
+            "total_conversations": metrics.total_conversations,
+            "total_messages": metrics.total_messages,
+            "total_tokens": metrics.total_tokens,
+            "avg_messages_per_conversation": metrics.avg_messages_per_conversation,
+            "avg_tokens_per_conversation": metrics.avg_tokens_per_conversation,
+            "conversations_with_clarifications": metrics.conversations_with_clarifications,
+            "conversations_with_long_chains": metrics.conversations_with_long_chains,
+            "conversations_with_short_prompts": metrics.conversations_with_short_prompts,
+        }
+
+        mode = "w" if fresh else "a"
+        with open(filepath, mode, encoding="utf-8") as f:
+            f.write(json.dumps(metrics_dict) + "\n")
+
+    def save_recommendations_append(
+        self, filepath, recommendations: List[Recommendation], fresh: bool = False
+    ) -> None:
+        """Append recommendations to JSONL file (one JSON object per line).
+
+        Args:
+            filepath: Output file path.
+            recommendations: List of recommendations.
+            fresh: If True, overwrite file instead of appending.
+        """
+        mode = "w" if fresh else "a"
+        with open(filepath, mode, encoding="utf-8") as f:
+            for rec in recommendations:
+                rec_dict = {
+                    "analysis_id": rec.analysis_id,
+                    "timestamp": rec.timestamp,
+                    "priority": rec.priority.value,
+                    "category": rec.category,
+                    "issue": rec.issue,
+                    "impact": rec.impact,
+                    "recommendation": rec.recommendation,
+                    "action": rec.action,
+                }
+                if rec.example:
+                    rec_dict["example"] = {
+                        "current": rec.example.current,
+                        "improved": rec.example.improved,
+                    }
+                f.write(json.dumps(rec_dict) + "\n")

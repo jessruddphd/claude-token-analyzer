@@ -39,3 +39,6 @@ htmlcov/
 *.json
 recommendations.txt
 metrics.json
+
+# Output directory (analysis results, metrics, recommendations)
+/output/

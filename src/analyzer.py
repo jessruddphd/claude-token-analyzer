@@ -1,6 +1,8 @@
 """Core conversation analysis engine."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import List, Optional
+import uuid
 
 from src.estimators import TokenEstimator
 from src.models import Conversation
@@ -46,6 +48,8 @@ class BatchMetrics:
     conversations_with_clarifications: int = 0
     conversations_with_long_chains: int = 0
     conversations_with_short_prompts: int = 0
+    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    analysis_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 
 class ConversationAnalyzer:
