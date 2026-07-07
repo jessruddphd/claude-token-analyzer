@@ -128,6 +128,8 @@ pytest tests/unit/
 
 ## Prompt Engineering Setup
 
+⚠️ **FanDuel Note**: Ollama and Gemma 4 are currently under security review. This feature is **not yet available for use on FanDuel machines**. Check with your security team for availability updates.
+
 The `engineer-prompt` subcommand uses **local Gemma 4** (via Ollama) to improve prompts before you send them to Claude. This is completely optional—you can use the analyzer without it.
 
 ### Why Use This?
