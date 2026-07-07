@@ -1,15 +1,10 @@
 /**
  * Claude Token Analyzer - Conversation Extractor Bookmarklet
  *
- * Extracts conversation data from claude.ai and exports as JSON
- * Usage: Create bookmark with javascript: code from claude_extractor_bookmarklet.txt
+ * Extracts COMPLETE conversation data from claude.ai by scrolling through
+ * the entire conversation to load all messages (handles virtual scrolling)
  *
- * Multiple extraction strategies to handle various DOM structures:
- * 1. Data attributes (most reliable)
- * 2. Class name patterns
- * 3. Element positioning heuristics
- * 4. Conversation thread parsing
- * 5. Full page text fallback
+ * Key improvement: Scrolls to load all messages before extraction
  */
 
 (async function() {
@@ -29,9 +24,13 @@
       z-index: 10000;
       box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     `;
-    statusEl.textContent = '⏳ Extracting conversation...';
+    statusEl.textContent = '⏳ Loading entire conversation...';
     document.body.appendChild(statusEl);
 
+    // Step 1: Scroll to load all messages
+    await loadAllMessages(statusEl);
+
+    // Step 2: Extract conversation data
     const conversationData = extractConversation();
 
     if (!conversationData || conversationData.messages.length === 0) {
@@ -60,64 +59,119 @@
     }
   }
 
+  async function loadAllMessages(statusEl) {
+    // Find the scrollable conversation container
+    const conversationContainer = findConversationContainer();
+    if (!conversationContainer) {
+      throw new Error('Could not find conversation container');
+    }
+
+    // Scroll to top first to start from beginning
+    conversationContainer.scrollTop = 0;
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Keep track of previously loaded message count
+    let previousMessageCount = 0;
+    let unchangedChecks = 0;
+    const maxUnchangedChecks = 5;
+
+    // Scroll through entire conversation to load all messages
+    while (unchangedChecks < maxUnchangedChecks) {
+      const currentMessageCount = countVisibleMessages();
+
+      if (currentMessageCount === previousMessageCount) {
+        unchangedChecks++;
+      } else {
+        unchangedChecks = 0;
+        previousMessageCount = currentMessageCount;
+      }
+
+      statusEl.textContent = `⏳ Loading... (${currentMessageCount} messages loaded)`;
+
+      // Scroll up to load earlier messages
+      conversationContainer.scrollTop -= 1000;
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+
+    // Now scroll to bottom to ensure we captured everything
+    conversationContainer.scrollTop = conversationContainer.scrollHeight;
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Final scroll to top and back to ensure all content is loaded
+    conversationContainer.scrollTop = 0;
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+
+  function findConversationContainer() {
+    // Try multiple selectors for the scrollable container
+    const selectors = [
+      '[class*="conversation"]',
+      '[class*="chat-container"]',
+      '[class*="messages"]',
+      '[role="main"]',
+      'main',
+    ];
+
+    for (const selector of selectors) {
+      const el = document.querySelector(selector);
+      if (el && isScrollable(el)) {
+        return el;
+      }
+    }
+
+    // Fallback: find any scrollable div with significant height
+    const allDivs = Array.from(document.querySelectorAll('div'));
+    return allDivs.find(div => {
+      return isScrollable(div) && div.scrollHeight > window.innerHeight * 2;
+    });
+  }
+
+  function isScrollable(element) {
+    return element.scrollHeight > element.clientHeight;
+  }
+
+  function countVisibleMessages() {
+    const selectors = [
+      '[data-message-id]',
+      '[class*="message-group"]',
+      '[class*="prose"][class*="message"]',
+      '[role="article"]',
+    ];
+
+    for (const selector of selectors) {
+      const count = document.querySelectorAll(selector).length;
+      if (count > 0) return count;
+    }
+
+    return 0;
+  }
+
   function extractConversation() {
     const messages = [];
     const conversationId = extractConversationId();
     const createdAt = new Date().toISOString();
 
-    // Strategy 1: Look for message container elements with data attributes
-    let messageElements = Array.from(document.querySelectorAll('[data-message-id], [data-testid*="message"], [class*="message-group"]'));
+    // Collect all message elements from the page
+    const allMessages = collectAllMessageElements();
 
-    if (messageElements.length === 0) {
-      // Strategy 2: Look for prose/text content containers
-      messageElements = Array.from(document.querySelectorAll('[class*="prose"], [class*="markdown"], [role="article"]'));
-    }
+    // Extract and deduplicate messages
+    const seenContent = new Set();
 
-    if (messageElements.length === 0) {
-      // Strategy 3: Look in main content area
-      const mainContent = document.querySelector('[role="main"], main, [class*="chat"], [class*="conversation"]');
-      if (mainContent) {
-        messageElements = Array.from(mainContent.querySelectorAll('[class*="message"], [class*="Message"], [class*="response"]'));
-      }
-    }
-
-    if (messageElements.length === 0) {
-      // Strategy 4: Get all divs with substantial text content
-      const allDivs = Array.from(document.querySelectorAll('div'));
-      messageElements = allDivs.filter(div => {
-        const text = div.textContent;
-        return text && text.length > 30 && text.length < 10000 && !div.querySelector('input, button, [role="button"]');
-      });
-    }
-
-    // Extract messages from elements
-    for (const el of messageElements) {
-      const role = detectRole(el);
+    for (const { element, role } of allMessages) {
       if (!role) continue;
 
-      const content = extractMessageContent(el);
-      if (content && content.trim().length > 0) {
-        // Check if we already have this message (avoid duplicates)
-        const isDuplicate = messages.some(m => m.content === content && m.role === role);
-        if (!isDuplicate) {
-          messages.push({
-            role: role,
-            content: content,
-            timestamp: new Date().toISOString(),
-          });
-        }
-      }
-    }
+      const content = extractMessageContent(element);
+      if (!content || content.length < 1) continue;
 
-    // If extraction still minimal, try parsing the visible conversation thread
-    if (messages.length < 2) {
-      messages.length = 0;
-      messages.push(...extractFromConversationThread());
-    }
+      // Deduplicate
+      if (seenContent.has(content)) continue;
+      seenContent.add(content);
 
-    // If still nothing, try extracting from structured data
-    if (messages.length === 0) {
-      messages.push(...extractFromPageText());
+      messages.push({
+        role: role,
+        content: content,
+        timestamp: new Date().toISOString(),
+      });
     }
 
     return {
@@ -127,10 +181,57 @@
     };
   }
 
+  function collectAllMessageElements() {
+    const messagesByRole = [];
+
+    // Strategy 1: Data attributes
+    const dataAttrMessages = Array.from(document.querySelectorAll('[data-message-id], [data-testid*="message"]'));
+    for (const el of dataAttrMessages) {
+      const role = detectRole(el);
+      if (role) messagesByRole.push({ element: el, role });
+    }
+
+    if (messagesByRole.length > 0) return messagesByRole;
+
+    // Strategy 2: Class-based message containers
+    const classMessages = Array.from(document.querySelectorAll('[class*="message-group"], [class*="prose"][class*="message"]'));
+    for (const el of classMessages) {
+      const role = detectRole(el);
+      if (role) messagesByRole.push({ element: el, role });
+    }
+
+    if (messagesByRole.length > 0) return messagesByRole;
+
+    // Strategy 3: Look in main content area
+    const mainContent = document.querySelector('[role="main"], main');
+    if (mainContent) {
+      const messageContainers = Array.from(mainContent.querySelectorAll('[class*="message"], [class*="Message"], div[class*="rounded"]'));
+      for (const el of messageContainers) {
+        const role = detectRole(el);
+        if (role) messagesByRole.push({ element: el, role });
+      }
+    }
+
+    if (messagesByRole.length > 0) return messagesByRole;
+
+    // Strategy 4: All divs with substantial text
+    const allDivs = Array.from(document.querySelectorAll('div')).filter(div => {
+      const text = div.textContent;
+      return text && text.length > 40 && text.length < 15000 && !div.querySelector('input, button');
+    });
+
+    for (const el of allDivs) {
+      const role = detectRole(el);
+      if (role) messagesByRole.push({ element: el, role });
+    }
+
+    return messagesByRole;
+  }
+
   function detectRole(element) {
     const classList = element.className.toLowerCase();
 
-    // Check data attributes first
+    // Check data attributes
     if (element.dataset.role === 'user' || element.getAttribute('data-role') === 'user') {
       return 'user';
     }
@@ -138,31 +239,31 @@
       return 'assistant';
     }
 
-    // Check text and class indicators
-    if (classList.includes('user') || classList.includes('from-user')) {
+    // Check class names
+    if (classList.includes('user') || classList.includes('from-user') || classList.includes('user-message')) {
       return 'user';
     }
-    if (classList.includes('assistant') || classList.includes('from-assistant') || classList.includes('ai-response')) {
+    if (classList.includes('assistant') || classList.includes('from-assistant') || classList.includes('assistant-message') || classList.includes('ai-response')) {
       return 'assistant';
     }
 
-    // Heuristic: code blocks typically from assistant
-    if (element.querySelector('pre, code')) {
+    // Code blocks usually from assistant
+    if (element.querySelector('pre, code, [class*="codeblock"]')) {
       return 'assistant';
     }
 
-    // Heuristic: right-aligned or specific styling typically user
+    // Check positioning (user messages often right-aligned)
     const styles = window.getComputedStyle(element);
-    if (styles.marginLeft === 'auto' || styles.marginInlineStart === 'auto' || styles.float === 'right') {
+    if (styles.marginLeft === 'auto' || styles.marginInlineStart === 'auto') {
       return 'user';
     }
 
-    // Check if parent has role indicators
+    // Check parent class
     const parent = element.parentElement;
     if (parent) {
       const parentClass = parent.className.toLowerCase();
-      if (parentClass.includes('user') || parentClass.includes('from-user')) return 'user';
-      if (parentClass.includes('assistant') || parentClass.includes('from-assistant')) return 'assistant';
+      if (parentClass.includes('user')) return 'user';
+      if (parentClass.includes('assistant')) return 'assistant';
     }
 
     return null;
@@ -171,104 +272,23 @@
   function extractMessageContent(element) {
     let content = element.textContent.trim();
 
-    // Remove common UI artifacts
-    content = content.replace(/^(User|Claude|Assistant|You|Me):\s*/i, '');
-    content = content.replace(/^\s*(Copy|Copied|Share|Copy to clipboard|\.{3}|More|Less)\s*$/gim, '');
-    content = content.replace(/\n(Copy|Copied|Share|Copy to clipboard|\.{3})\s*$/i, '');
+    // Remove role prefixes
+    content = content.replace(/^(User|Claude|Assistant|You|Me|You said):\s*/i, '');
+
+    // Remove UI elements and buttons
+    content = content.replace(/^\s*(Copy|Copied|Share|Copy to clipboard|Edit|Delete|More|Less|\.{3})\s*$/gim, '');
+    content = content.replace(/\n(Copy|Copied|Share|Copy to clipboard|Edit|Delete|\.{3})\s*$/i, '');
+
     content = content.trim();
 
-    if (content.length < 1) return null;
+    // Ensure meaningful content
+    if (content.length < 1 || content.length > 20000) return null;
 
     return content;
   }
 
-  function extractFromConversationThread() {
-    const messages = [];
-
-    const chatContainers = Array.from(document.querySelectorAll(
-      '[class*="chat"], [class*="conversation"], [role="region"]'
-    ));
-
-    for (const container of chatContainers) {
-      const potentialMessages = Array.from(container.children).filter(child => {
-        const text = child.textContent;
-        return text && text.length > 20 && text.length < 20000;
-      });
-
-      for (const msg of potentialMessages) {
-        const role = detectRole(msg);
-        if (!role) continue;
-
-        const content = extractMessageContent(msg);
-        if (content && content.length > 1) {
-          const isDuplicate = messages.some(m => m.content === content);
-          if (!isDuplicate) {
-            messages.push({
-              role: role,
-              content: content,
-              timestamp: new Date().toISOString(),
-            });
-          }
-        }
-      }
-
-      if (messages.length > 0) break;
-    }
-
-    return messages;
-  }
-
-  function extractFromPageText() {
-    const messages = [];
-    const pageText = document.body.innerText;
-    const lines = pageText.split('\n').filter(l => l.trim().length > 0);
-
-    let currentRole = null;
-    let currentContent = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const trimmed = lines[i].trim();
-      const lower = trimmed.toLowerCase();
-
-      if (lower.match(/^(user|you|me)[\s:]*$/) && i + 1 < lines.length) {
-        if (currentContent.length > 0) {
-          messages.push({
-            role: currentRole || 'assistant',
-            content: currentContent.join('\n').trim(),
-            timestamp: new Date().toISOString(),
-          });
-          currentContent = [];
-        }
-        currentRole = 'user';
-      } else if (lower.match(/^(claude|assistant|ai)[\s:]*$/) && i + 1 < lines.length) {
-        if (currentContent.length > 0) {
-          messages.push({
-            role: currentRole || 'user',
-            content: currentContent.join('\n').trim(),
-            timestamp: new Date().toISOString(),
-          });
-          currentContent = [];
-        }
-        currentRole = 'assistant';
-      } else if (trimmed.length > 0 && currentRole) {
-        if (!trimmed.match(/^(copy|copied|share|\.{3}|more|less)$/i)) {
-          currentContent.push(trimmed);
-        }
-      }
-    }
-
-    if (currentContent.length > 0) {
-      messages.push({
-        role: currentRole || 'assistant',
-        content: currentContent.join('\n').trim(),
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    return messages;
-  }
-
   function extractConversationId() {
+    // Try URL patterns
     const urlMatch = window.location.pathname.match(/\/chat\/([a-f0-9-]+)/);
     if (urlMatch) return urlMatch[1];
 
