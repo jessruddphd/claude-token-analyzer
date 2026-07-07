@@ -23,8 +23,6 @@ Analyze your Claude conversation usage patterns and get personalized recommendat
 
 ### Step 1: Extract Conversation Data
 
-#### Option A: Using the Bookmarklet (Recommended)
-
 1. **Install the bookmarklet**:
    - Open `bookmarklet/claude_extractor_bookmarklet.txt` in this repo
    - Copy the entire content (it's one long line starting with `javascript:`)
@@ -41,14 +39,6 @@ Analyze your Claude conversation usage patterns and get personalized recommendat
    - Go to any conversation on claude.ai
    - Click the "Claude Extractor" bookmark
    - Conversation downloads as `claude-conversation.json`
-
-#### Option B: Manual Export
-
-If bookmarklet doesn't work:
-1. Go to claude.ai conversation
-2. Look for export/share options
-3. Export as JSON
-4. Save to your computer
 
 ### Step 2: Analyze the Data
 
