@@ -1,10 +1,8 @@
 /**
  * Claude Token Analyzer - Conversation Extractor Bookmarklet
  *
- * Extracts COMPLETE conversation data from claude.ai by scrolling through
- * the entire conversation to load all messages (handles virtual scrolling)
- *
- * Key improvement: Scrolls to load all messages before extraction
+ * Robust extraction that handles virtual scrolling by scrolling through
+ * the entire conversation and waiting for all messages to load.
  */
 
 (async function() {
@@ -24,13 +22,13 @@
       z-index: 10000;
       box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     `;
-    statusEl.textContent = '⏳ Loading entire conversation...';
+    statusEl.textContent = '⏳ Loading entire conversation (this may take a moment)...';
     document.body.appendChild(statusEl);
 
-    // Step 1: Scroll to load all messages
-    await loadAllMessages(statusEl);
+    // Find and scroll the conversation
+    await scrollToLoadAllMessages(statusEl);
 
-    // Step 2: Extract conversation data
+    // Extract all messages from the page
     const conversationData = extractConversation();
 
     if (!conversationData || conversationData.messages.length === 0) {
@@ -59,91 +57,57 @@
     }
   }
 
-  async function loadAllMessages(statusEl) {
-    // Find the scrollable conversation container
-    const conversationContainer = findConversationContainer();
-    if (!conversationContainer) {
+  async function scrollToLoadAllMessages(statusEl) {
+    // Find the main scrollable conversation container
+    let container = document.querySelector('[role="main"]');
+    if (!container) container = document.querySelector('main');
+    if (!container) {
+      const all = document.querySelectorAll('div');
+      for (let div of all) {
+        if (div.scrollHeight > window.innerHeight * 2 && div.clientHeight < div.scrollHeight) {
+          container = div;
+          break;
+        }
+      }
+    }
+
+    if (!container) {
       throw new Error('Could not find conversation container');
     }
 
-    // Scroll to top first to start from beginning
-    conversationContainer.scrollTop = 0;
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Scroll to top first
+    container.scrollTop = 0;
+    await sleep(1000);
 
-    // Keep track of previously loaded message count
-    let previousMessageCount = 0;
-    let unchangedChecks = 0;
-    const maxUnchangedChecks = 5;
+    let previousHeight = 0;
+    let noChangeCount = 0;
+    const maxNoChangeAttempts = 8;
 
-    // Scroll through entire conversation to load all messages
-    while (unchangedChecks < maxUnchangedChecks) {
-      const currentMessageCount = countVisibleMessages();
+    // Scroll upward (earlier messages are typically above)
+    while (noChangeCount < maxNoChangeAttempts) {
+      const currentHeight = container.scrollHeight;
 
-      if (currentMessageCount === previousMessageCount) {
-        unchangedChecks++;
+      if (currentHeight === previousHeight) {
+        noChangeCount++;
+        statusEl.textContent = `⏳ Checking for more messages... (${noChangeCount}/${maxNoChangeAttempts})`;
       } else {
-        unchangedChecks = 0;
-        previousMessageCount = currentMessageCount;
+        noChangeCount = 0;
+        previousHeight = currentHeight;
+        statusEl.textContent = `⏳ Loading messages... (Height: ${Math.round(currentHeight)}px)`;
       }
 
-      statusEl.textContent = `⏳ Loading... (${currentMessageCount} messages loaded)`;
-
-      // Scroll up to load earlier messages
-      conversationContainer.scrollTop -= 1000;
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Scroll up aggressively
+      container.scrollTop = Math.max(0, container.scrollTop - 2000);
+      await sleep(500);
     }
 
-    // Now scroll to bottom to ensure we captured everything
-    conversationContainer.scrollTop = conversationContainer.scrollHeight;
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Now scroll all the way to bottom
+    container.scrollTop = container.scrollHeight;
+    await sleep(800);
 
-    // Final scroll to top and back to ensure all content is loaded
-    conversationContainer.scrollTop = 0;
-    await new Promise(resolve => setTimeout(resolve, 300));
-  }
-
-  function findConversationContainer() {
-    // Try multiple selectors for the scrollable container
-    const selectors = [
-      '[class*="conversation"]',
-      '[class*="chat-container"]',
-      '[class*="messages"]',
-      '[role="main"]',
-      'main',
-    ];
-
-    for (const selector of selectors) {
-      const el = document.querySelector(selector);
-      if (el && isScrollable(el)) {
-        return el;
-      }
-    }
-
-    // Fallback: find any scrollable div with significant height
-    const allDivs = Array.from(document.querySelectorAll('div'));
-    return allDivs.find(div => {
-      return isScrollable(div) && div.scrollHeight > window.innerHeight * 2;
-    });
-  }
-
-  function isScrollable(element) {
-    return element.scrollHeight > element.clientHeight;
-  }
-
-  function countVisibleMessages() {
-    const selectors = [
-      '[data-message-id]',
-      '[class*="message-group"]',
-      '[class*="prose"][class*="message"]',
-      '[role="article"]',
-    ];
-
-    for (const selector of selectors) {
-      const count = document.querySelectorAll(selector).length;
-      if (count > 0) return count;
-    }
-
-    return 0;
+    // And back to top to make sure everything is loaded
+    container.scrollTop = 0;
+    await sleep(500);
   }
 
   function extractConversation() {
@@ -151,21 +115,21 @@
     const conversationId = extractConversationId();
     const createdAt = new Date().toISOString();
 
-    // Collect all message elements from the page
-    const allMessages = collectAllMessageElements();
+    // Collect ALL potential message elements
+    const messageElements = findAllMessageElements();
+    const seenMessages = new Set();
 
-    // Extract and deduplicate messages
-    const seenContent = new Set();
-
-    for (const { element, role } of allMessages) {
+    for (const element of messageElements) {
+      const role = detectRole(element);
       if (!role) continue;
 
       const content = extractMessageContent(element);
-      if (!content || content.length < 1) continue;
+      if (!content || content.length < 2) continue;
 
-      // Deduplicate
-      if (seenContent.has(content)) continue;
-      seenContent.add(content);
+      // Create a signature to avoid duplicates
+      const signature = `${role}::${content.substring(0, 100)}`;
+      if (seenMessages.has(signature)) continue;
+      seenMessages.add(signature);
 
       messages.push({
         role: role,
@@ -181,122 +145,128 @@
     };
   }
 
-  function collectAllMessageElements() {
-    const messagesByRole = [];
+  function findAllMessageElements() {
+    const found = [];
 
-    // Strategy 1: Data attributes
-    const dataAttrMessages = Array.from(document.querySelectorAll('[data-message-id], [data-testid*="message"]'));
-    for (const el of dataAttrMessages) {
-      const role = detectRole(el);
-      if (role) messagesByRole.push({ element: el, role });
+    // Strategy 1: Look for elements with data attributes
+    const dataAttrElements = document.querySelectorAll('[data-message-id], [data-testid*="message"]');
+    for (let el of dataAttrElements) {
+      found.push(el);
     }
 
-    if (messagesByRole.length > 0) return messagesByRole;
-
-    // Strategy 2: Class-based message containers
-    const classMessages = Array.from(document.querySelectorAll('[class*="message-group"], [class*="prose"][class*="message"]'));
-    for (const el of classMessages) {
-      const role = detectRole(el);
-      if (role) messagesByRole.push({ element: el, role });
+    // Strategy 2: Look for message-group or message containers
+    const messageGroups = document.querySelectorAll('[class*="message-group"], [class*="message-container"]');
+    for (let el of messageGroups) {
+      // Find actual content within
+      const content = el.querySelector('[class*="prose"], [class*="markdown"], p, div');
+      if (content) found.push(content);
     }
 
-    if (messagesByRole.length > 0) return messagesByRole;
-
-    // Strategy 3: Look in main content area
-    const mainContent = document.querySelector('[role="main"], main');
-    if (mainContent) {
-      const messageContainers = Array.from(mainContent.querySelectorAll('[class*="message"], [class*="Message"], div[class*="rounded"]'));
-      for (const el of messageContainers) {
-        const role = detectRole(el);
-        if (role) messagesByRole.push({ element: el, role });
+    // Strategy 3: Main content area
+    const main = document.querySelector('[role="main"], main');
+    if (main) {
+      // Look for divs that are direct children or close to it
+      const candidates = main.querySelectorAll('div[class*="message"], div[class*="response"], div[class*="turn"]');
+      for (let el of candidates) {
+        found.push(el);
       }
     }
 
-    if (messagesByRole.length > 0) return messagesByRole;
-
-    // Strategy 4: All divs with substantial text
-    const allDivs = Array.from(document.querySelectorAll('div')).filter(div => {
-      const text = div.textContent;
-      return text && text.length > 40 && text.length < 15000 && !div.querySelector('input, button');
-    });
-
-    for (const el of allDivs) {
-      const role = detectRole(el);
-      if (role) messagesByRole.push({ element: el, role });
+    // Strategy 4: Find ANY divs with substantial text (backup)
+    const allDivs = document.querySelectorAll('div');
+    for (let div of allDivs) {
+      const text = div.textContent.trim();
+      // Look for divs with actual message-like content
+      if (text.length > 50 && text.length < 20000) {
+        // Avoid UI elements
+        if (!div.querySelector('input, button, textarea, [contenteditable]')) {
+          // Check if it contains actual message-like structure
+          if (div.children.length < 50) { // Not too many children
+            found.push(div);
+          }
+        }
+      }
     }
 
-    return messagesByRole;
+    // Filter to remove duplicates and very small elements
+    const unique = [];
+    const textSeen = new Set();
+
+    for (let el of found) {
+      const text = el.textContent.trim();
+      if (text.length < 2) continue;
+      if (textSeen.has(text.substring(0, 200))) continue;
+      textSeen.add(text.substring(0, 200));
+      unique.push(el);
+    }
+
+    return unique;
   }
 
   function detectRole(element) {
-    const classList = element.className.toLowerCase();
+    const classList = (element.className || '').toLowerCase();
+    const parent = element.parentElement;
+    const parentClass = (parent?.className || '').toLowerCase();
 
     // Check data attributes
-    if (element.dataset.role === 'user' || element.getAttribute('data-role') === 'user') {
+    if (element.dataset.role === 'user') return 'user';
+    if (element.dataset.role === 'assistant') return 'assistant';
+
+    // Check classes
+    if (classList.includes('user') || classList.includes('from-user') || parentClass.includes('user')) {
       return 'user';
     }
-    if (element.dataset.role === 'assistant' || element.getAttribute('data-role') === 'assistant') {
+    if (classList.includes('assistant') || classList.includes('from-assistant') || parentClass.includes('assistant')) {
       return 'assistant';
     }
 
-    // Check class names
-    if (classList.includes('user') || classList.includes('from-user') || classList.includes('user-message')) {
-      return 'user';
-    }
-    if (classList.includes('assistant') || classList.includes('from-assistant') || classList.includes('assistant-message') || classList.includes('ai-response')) {
+    // Code blocks → likely assistant
+    if (element.querySelector('pre, code')) {
       return 'assistant';
     }
 
-    // Code blocks usually from assistant
-    if (element.querySelector('pre, code, [class*="codeblock"]')) {
-      return 'assistant';
+    // Check grandparent for role info
+    const gp = parent?.parentElement;
+    const gpClass = (gp?.className || '').toLowerCase();
+    if (gpClass.includes('user')) return 'user';
+    if (gpClass.includes('assistant')) return 'assistant';
+
+    // Look at all ancestors for clues
+    let current = element;
+    for (let i = 0; i < 5; i++) {
+      if (!current) break;
+      const c = (current.className || '').toLowerCase();
+      if (c.includes('user-message') || c.includes('from-user')) return 'user';
+      if (c.includes('assistant-message') || c.includes('from-assistant') || c.includes('ai-response')) return 'assistant';
+      current = current.parentElement;
     }
 
-    // Check positioning (user messages often right-aligned)
-    const styles = window.getComputedStyle(element);
-    if (styles.marginLeft === 'auto' || styles.marginInlineStart === 'auto') {
-      return 'user';
-    }
-
-    // Check parent class
-    const parent = element.parentElement;
-    if (parent) {
-      const parentClass = parent.className.toLowerCase();
-      if (parentClass.includes('user')) return 'user';
-      if (parentClass.includes('assistant')) return 'assistant';
-    }
-
+    // Default: if we can't determine, skip
     return null;
   }
 
   function extractMessageContent(element) {
-    let content = element.textContent.trim();
+    let text = element.textContent.trim();
 
-    // Remove role prefixes
-    content = content.replace(/^(User|Claude|Assistant|You|Me|You said):\s*/i, '');
+    // Remove common UI text
+    text = text.replace(/^(User|You|Assistant|Claude|Me):\s*/i, '');
+    text = text.replace(/\n\s*(Copy|Copied|Share|Edit|Delete|More|Less|\.{3})\s*$/gm, '');
+    text = text.replace(/^\s*(Copy|Copied|Share|Edit|Delete|More|Less|\.{3})\s*\n/gm, '');
+    text = text.trim();
 
-    // Remove UI elements and buttons
-    content = content.replace(/^\s*(Copy|Copied|Share|Copy to clipboard|Edit|Delete|More|Less|\.{3})\s*$/gim, '');
-    content = content.replace(/\n(Copy|Copied|Share|Copy to clipboard|Edit|Delete|\.{3})\s*$/i, '');
+    if (text.length < 2 || text.length > 25000) {
+      return null;
+    }
 
-    content = content.trim();
-
-    // Ensure meaningful content
-    if (content.length < 1 || content.length > 20000) return null;
-
-    return content;
+    return text;
   }
 
   function extractConversationId() {
-    // Try URL patterns
-    const urlMatch = window.location.pathname.match(/\/chat\/([a-f0-9-]+)/);
-    if (urlMatch) return urlMatch[1];
+    const match = window.location.pathname.match(/\/chat\/([a-f0-9-]+)/);
+    if (match) return match[1];
 
-    const href = window.location.href;
-    if (href.includes('claude.ai')) {
-      const idMatch = href.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/);
-      if (idMatch) return idMatch[0];
-    }
+    const hrefMatch = window.location.href.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/);
+    if (hrefMatch) return hrefMatch[0];
 
     return `conv_${Date.now()}`;
   }
@@ -312,5 +282,9 @@
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  }
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 })();
