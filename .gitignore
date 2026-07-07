@@ -40,5 +40,8 @@ htmlcov/
 recommendations.txt
 metrics.json
 
+# Bookmarklet (auto-generated from source)
+bookmarklet/claude_extractor_bookmarklet.txt
+
 # Output directory (analysis results, metrics, recommendations)
 /output/

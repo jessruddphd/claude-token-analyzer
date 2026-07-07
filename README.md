@@ -33,7 +33,11 @@ Analyze your Claude conversation usage patterns and get personalized recommendat
      - **URL**: Paste the entire content from the file
      - Click Save
    
-   **Note**: Use the `.txt` file (minified, no comments). The `.js` file has comments that break bookmarklets.
+   **Note about the bookmarklet files:**
+   - `claude_extractor.js` is the source (readable, with comments)
+   - `claude_extractor_bookmarklet.txt` is auto-generated from the source
+   - If you update the `.js` file, run `python3 bookmarklet/build.py` to regenerate the `.txt` file
+   - Never manually edit the `.txt` file — it will be overwritten by the build script
 
 2. **Extract conversation**:
    - Go to any conversation on claude.ai
