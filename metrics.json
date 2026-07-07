@@ -1,10 +1,10 @@
 {
   "total_conversations": 1,
-  "total_messages": 3,
-  "total_tokens": 187,
-  "avg_messages_per_conversation": 3.0,
-  "avg_tokens_per_conversation": 187.0,
+  "total_messages": 90,
+  "total_tokens": 21314,
+  "avg_messages_per_conversation": 90.0,
+  "avg_tokens_per_conversation": 21314.0,
   "conversations_with_clarifications": 0,
-  "conversations_with_long_chains": 0,
+  "conversations_with_long_chains": 1,
   "conversations_with_short_prompts": 0
 }

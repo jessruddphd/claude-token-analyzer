@@ -21,14 +21,16 @@ Analyze your Claude conversation usage patterns and get personalized recommendat
 #### Option A: Using the Bookmarklet (Recommended)
 
 1. **Install the bookmarklet**:
-   - Open `bookmarklet/claude_extractor.js` in this repo
-   - Copy the entire code
+   - Open `bookmarklet/claude_extractor_bookmarklet.txt` in this repo
+   - Copy the entire content (it's one long line starting with `javascript:`)
    - In your browser:
      - Right-click on Bookmarks → Bookmark Manager (or press `Ctrl+Shift+B`)
      - Click the three dots → Add new bookmark
      - **Name**: "Claude Extractor"
-     - **URL**: Paste the JavaScript code you copied (starts with `javascript:`)
+     - **URL**: Paste the entire content from the file
      - Click Save
+   
+   **Note**: Use the `.txt` file (minified, no comments). The `.js` file has comments that break bookmarklets.
 
 2. **Extract conversation**:
    - Go to any conversation on claude.ai
